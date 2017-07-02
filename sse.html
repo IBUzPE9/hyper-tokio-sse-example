@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8"> 
+    <title>Rust SSE</title>
+  </head>
+  <body>
+    <h1>Rust SSE</h1>
+
+    <div id="sse-msg">
+    </div>
+
+    <script type="text/javascript">
+      var evtSource = new EventSource("http://127.0.0.1:7778/");
+
+      evtSource.addEventListener("userconnect", function(e) {
+          var sseMsgDiv = document.getElementById('sse-msg');
+          const obj = JSON.parse(e.data);
+          sseMsgDiv.innerHTML += '<p>' + obj.username + ' : ' + obj.time + '</p>';
+          console.log(obj);
+      }, false);
+    </script>
+  </body>
+</html>

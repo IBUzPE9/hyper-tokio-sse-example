@@ -1,0 +1,11 @@
+[package]
+name = "hyper-proto-sse"
+version = "0.1.0"
+authors = ["Alex <to.the@trash.can>"]
+
+[dependencies]
+hyper= "*"
+futures="*"
+pretty_env_logger="*"
+tokio-core="*"
+tokio-io="*"
