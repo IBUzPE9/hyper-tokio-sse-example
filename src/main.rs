@@ -38,6 +38,10 @@ where
     }
 }
 
+// this fn replaces closures to avoid boxing in some cases
+fn print_err<T:std::fmt::Debug>(t:T) {
+    println!("{:?}", t);
+}
 
 struct EventService {
     tx_new: mpsc::Sender<mpsc::Sender<Result<Chunk,hyper::Error>>>,
@@ -51,10 +55,10 @@ impl Service for EventService {
 
     fn call(&self, req: Request) -> Self::Future {
         match (req.method(), req.path()) {
-            (&Get, "/") => {
+            (&Get, "/events") => { println!("request events");
                 let (tx_msg, rx_msg) = mpsc::channel(10);
                 self.tx_new.clone().send(tx_msg)
-                    .map_err(|_| hyper::Error::Incomplete)// other errors types disllowed by hyper
+                    .map_err(|_| hyper::Error::Incomplete)// other errors types disallowed by hyper
                     .and_then(|_|{
                         Ok(Response::new()
                             .with_status(StatusCode::Ok)
@@ -66,19 +70,25 @@ impl Service for EventService {
                     .boxed() 
             },
 
-            _ => future_ok(Response::new().with_status(StatusCode::NotFound)).boxed()
+            (&Get, "/") => { println!("request html");
+                future_ok(Response::new()
+                    .with_status(StatusCode::Ok)
+                    .with_body(HTML))
+                    .boxed()
+            }
+
+            _ => { println!("invalid request");
+                future_ok(Response::new()
+                    .with_status(StatusCode::NotFound))
+                    .boxed()
+            }
         }
     }
 }
 
-// this fn replaces closures to avoid boxing in some cases
-fn print_err<T:std::fmt::Debug>(t:T){
-    println!("{:?}", t);
-}
-
 fn main() {
     pretty_env_logger::init().expect("unable to initialize the env logger");
-    let addr = "127.0.0.1:7778".parse().expect("addres parsing failed");
+    let addr = "127.0.0.1:7878".parse().expect("addres parsing failed");
 
     let mut core = Core::new().expect("unable to initialize the main event loop");
     let handle = core.handle();
@@ -87,20 +97,23 @@ fn main() {
     let (tx_new, rx_new) = mpsc::channel(10);
 
     let event_delay = Duration::from_secs(2);
+    let start_time = std::time::Instant::now();
 
     let handle2 = core.handle();
     let fu_to = Timeout::new(event_delay, &handle2).unwrap().map_err(print_err);
     let fu_rx = rx_new.into_future().map_err(print_err);
 
-    let broker = loop_fn((fu_to, fu_rx, clients), move |(fu_to, fu_rx, mut clients)|{
+
+
+    let broker = loop_fn((fu_to, fu_rx, clients, 0), move |(fu_to, fu_rx, mut clients, event_counter)|{
         let handle = handle2.clone(); 
         fu_to.select2(fu_rx)
-            .map_err(|_| ())// !!!
+            .map_err(|_| ())
             .and_then(move |done|
                 match done {
                     Either::A((_, fu_rx)) => Case::A({//send messages
                         let tx_iter = clients.into_iter()
-                            .map(|tx| tx.send(Ok(Chunk::from(format!("event: userconnect\ndata: {{\"username\": \"Frodo\", \"time\": \"{:?}\"}}\n\n", std::time::SystemTime::now())))));
+                            .map(|tx| tx.send(Ok(Chunk::from(format!("event: uptime\ndata: {{\"number\": \"{}\", \"time\": \"{}\"}}\n\n", event_counter, start_time.elapsed().as_secs())))));
                         futures::stream::futures_unordered(tx_iter)
                             .map(|x| Some(x))
                             .or_else(|e| { println!("{:?} client removed", e); Ok::<_,()>(None)})
@@ -110,7 +123,8 @@ fn main() {
                                     futures::future::ok::<_,()>(Loop::Continue((
                                         Timeout::new(event_delay, &handle).unwrap().map_err(print_err),
                                         fu_rx, 
-                                        clients
+                                        clients,
+                                        event_counter + 1
                                     )))                            
                             )
 
@@ -128,7 +142,8 @@ fn main() {
                         futures::future::ok::<_,()>(Loop::Continue((
                             fu_to,
                             rx_new.into_future().map_err(print_err), 
-                            clients
+                            clients,
+                            event_counter
                         )))
                     }),
                 }              
@@ -147,3 +162,27 @@ fn main() {
 
     core.run(srv).expect("error running the event loop");
 }
+
+static HTML:&str = &r#"<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8"> 
+    <title>Rust Hyper Server Sent Events</title>
+  </head>
+  <body>
+    <h1>Rust Hyper Server Sent Events</h1>
+    <div id="sse-msg">
+    </div>
+    <script type="text/javascript">
+      var evtSource = new EventSource("http://127.0.0.1:7878/events");
+
+      evtSource.addEventListener("uptime", function(e) {
+          var sseMsgDiv = document.getElementById('sse-msg');
+          const obj = JSON.parse(e.data);
+          sseMsgDiv.innerHTML += '<p>' + 'message number: ' + obj.number + ', time since start: ' + obj.time + '</p>';
+          console.log(obj);
+      }, false);
+    </script>
+  </body>
+</html>
+"#;
