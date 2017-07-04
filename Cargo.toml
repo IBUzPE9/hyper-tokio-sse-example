@@ -1,11 +1,12 @@
 [package]
 name = "hyper-proto-sse"
-version = "0.1.2"
-authors = ["Alex <to.the@trash.can>"]
+version = "0.1.3"
+authors = ["Alex <do.not@email.pls>"]
 
 [dependencies]
-hyper= "*"
-futures="*"
-pretty_env_logger="*"
-tokio-core="*"
-tokio-io="*"
+hyper = "*"
+futures = "*"
+pretty_env_logger = "*"
+tokio-core = "*"
+tokio-io = "*"
+bytes = "*"

@@ -3,6 +3,9 @@ extern crate hyper;
 extern crate pretty_env_logger;
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate bytes;
+
+use bytes::{BytesMut, Bytes, BufMut};
 
 use futures::future::{BoxFuture, Either, ok as future_ok};
 use futures::{Stream,Future,Sink,Poll};
@@ -19,6 +22,7 @@ use hyper::header::{ContentType, Connection, AccessControlAllowOrigin};
 use hyper::Chunk;
 
 use std::time::Duration;
+use std::io::Write;
 
 
 enum Case<A,B>{A(A), B(B)}
@@ -112,20 +116,23 @@ fn main() {
             .and_then(move |done|
                 match done {
                     Either::A((_, fu_rx)) => Case::A({//send messages
-                        let tx_iter = clients.into_iter()
-                            .map(|tx| tx.send(Ok(Chunk::from(format!("event: uptime\ndata: {{\"number\": \"{}\", \"time\": \"{}\"}}\n\n", event_counter, start_time.elapsed().as_secs())))));
+                        let mut buf = BytesMut::with_capacity(512).writer();
+                        write!(buf, "event: uptime\ndata: {{\"number\": \"{}\", \"time\": \"{}\"}}\n\n", event_counter, start_time.elapsed().as_secs()).expect("msg write failed");
+                        let msg:Bytes = buf.into_inner().freeze();
+                        let tx_iter = clients.clone().into_iter()
+                            .map(move |tx| tx.send(Ok(Chunk::from(msg.clone()))));
                         futures::stream::futures_unordered(tx_iter)
                             .map(|x| Some(x))
                             .or_else(|e| { println!("{:?} client removed", e); Ok::<_,()>(None)})
                             .filter_map(|x| x)
                             .collect()
-                                .and_then(move |clients|
-                                    futures::future::ok::<_,()>(Loop::Continue((
-                                        Timeout::new(event_delay, &handle).unwrap().map_err(print_err),
-                                        fu_rx, 
-                                        clients,
-                                        event_counter + 1
-                                    )))                            
+                            .and_then(move |clients|
+                                future_ok(Loop::Continue((
+                                    Timeout::new(event_delay, &handle).unwrap().map_err(print_err),
+                                    fu_rx, 
+                                    clients,
+                                    event_counter + 1
+                                )))                            
                             )
 
                     }),
@@ -139,7 +146,7 @@ fn main() {
                             None => println!("keeper loop get None"),
                         }       
 
-                        futures::future::ok::<_,()>(Loop::Continue((
+                        future_ok(Loop::Continue((
                             fu_to,
                             rx_new.into_future().map_err(print_err), 
                             clients,
