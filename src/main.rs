@@ -119,8 +119,8 @@ fn main() {
                         let mut buf = BytesMut::with_capacity(512).writer();
                         write!(buf, "event: uptime\ndata: {{\"number\": \"{}\", \"time\": \"{}\"}}\n\n", event_counter, start_time.elapsed().as_secs()).expect("msg write failed");
                         let msg:Bytes = buf.into_inner().freeze();
-                        let tx_iter = clients.clone().into_iter()
-                            .map(move |tx| tx.send(Ok(Chunk::from(msg.clone()))));
+                        let tx_iter = clients.into_iter()
+                            .map(|tx| tx.send(Ok(Chunk::from(msg.clone()))));
                         futures::stream::futures_unordered(tx_iter)
                             .map(|x| Some(x))
                             .or_else(|e| { println!("{:?} client removed", e); Ok::<_,()>(None)})
