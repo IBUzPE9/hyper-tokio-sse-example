@@ -2,7 +2,6 @@ extern crate futures;
 extern crate hyper;
 extern crate pretty_env_logger;
 extern crate tokio_core;
-extern crate tokio_io;
 extern crate bytes;
 
 use bytes::{BytesMut, Bytes, BufMut};
@@ -12,8 +11,7 @@ use futures::{Stream,Future,Sink,Poll};
 use futures::sync::mpsc;
 use futures::future::{loop_fn, Loop};
 
-use tokio_core::reactor::{Core, Timeout};
-use tokio_core::net::TcpListener;
+use tokio_core::reactor::Timeout;
 
 use hyper::{Get, StatusCode};
 use hyper::server::{Http, Service, Request, Response};
@@ -81,7 +79,7 @@ impl Service for EventService {
                     .boxed()
             }
 
-            _ => { println!("invalid request");
+            (method, path) => { println!("invalid request method: {:?}, path: {:?}", method, path);
                 future_ok(Response::new()
                     .with_status(StatusCode::NotFound))
                     .boxed()
@@ -94,20 +92,18 @@ fn main() {
     pretty_env_logger::init().expect("unable to initialize the env logger");
     let addr = "127.0.0.1:7878".parse().expect("addres parsing failed");
 
-    let mut core = Core::new().expect("unable to initialize the main event loop");
-    let handle = core.handle();
-
     let clients:Vec<mpsc::Sender<Result<Chunk, hyper::Error>>> = Vec::new();
     let (tx_new, rx_new) = mpsc::channel(10);
 
     let event_delay = Duration::from_secs(2);
     let start_time = std::time::Instant::now();
 
-    let handle2 = core.handle();
-    let fu_to = Timeout::new(event_delay, &handle2).unwrap().map_err(print_err);
+    let server = Http::new().bind(&addr, move || Ok(EventService{ tx_new: tx_new.clone() })).expect("unable to create server");
+    let handle = server.handle();
+    let handle2 = handle.clone();
+
+    let fu_to = Timeout::new(event_delay, &handle).unwrap().map_err(print_err);
     let fu_rx = rx_new.into_future().map_err(print_err);
-
-
 
     let broker = loop_fn((fu_to, fu_rx, clients, 0), move |(fu_to, fu_rx, mut clients, event_counter)|{
         let handle = handle2.clone(); 
@@ -159,15 +155,8 @@ fn main() {
 
     handle.spawn(broker);
 
-    let listener = TcpListener::bind(&addr, &handle).expect("unable to listen");
-    println!("Listening on http://{} with 1 thread.", listener.local_addr().expect("local address show"));
-
-    let srv = listener.incoming().for_each(move |(stream, addr)| {
-        Http::new().bind_connection(&handle, stream, addr, EventService{ tx_new: tx_new.clone() });
-        Ok(())
-    });
-
-    core.run(srv).expect("error running the event loop");
+    println!("Listening on http://{} with 1 thread.", server.local_addr().expect("unable to get local address"));
+    server.run().expect("unable to run server");
 }
 
 static HTML:&str = &r#"<!DOCTYPE html>
