@@ -92,19 +92,19 @@ fn main() {
     pretty_env_logger::init().expect("unable to initialize the env logger");
     let addr = "127.0.0.1:7878".parse().expect("addres parsing failed");
 
-    let clients:Vec<mpsc::Sender<Result<Chunk, hyper::Error>>> = Vec::new();
     let (tx_new, rx_new) = mpsc::channel(10);
+
+    let server = Http::new().bind(&addr, move || Ok(EventService{ tx_new: tx_new.clone() })).expect("unable to create server");
+    let handle = server.handle();
+    let handle2 = handle.clone();    
 
     let event_delay = Duration::from_secs(2);
     let start_time = std::time::Instant::now();
 
-    let server = Http::new().bind(&addr, move || Ok(EventService{ tx_new: tx_new.clone() })).expect("unable to create server");
-    let handle = server.handle();
-    let handle2 = handle.clone();
-
     let fu_to = Timeout::new(event_delay, &handle).unwrap().map_err(print_err);
     let fu_rx = rx_new.into_future().map_err(print_err);
-
+    let clients:Vec<mpsc::Sender<Result<Chunk, hyper::Error>>> = Vec::new();
+    
     let broker = loop_fn((fu_to, fu_rx, clients, 0), move |(fu_to, fu_rx, mut clients, event_counter)|{
         let handle = handle2.clone(); 
         fu_to.select2(fu_rx)
@@ -130,7 +130,6 @@ fn main() {
                                     event_counter + 1
                                 )))                            
                             )
-
                     }),
                         
                     Either::B(((item, rx_new), fu_to)) => Case::B({//register new client
