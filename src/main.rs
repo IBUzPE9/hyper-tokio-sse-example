@@ -5,7 +5,6 @@ extern crate bytes;
 
 use bytes::{BytesMut, Bytes, BufMut};
 
-use futures::IntoFuture;
 use futures::Stream;
 use futures::future::{Future, Either, ok, loop_fn, Loop};
 use futures::sync::mpsc;
@@ -44,18 +43,16 @@ impl Service for EventService {
                 let (tx_msg, rx_msg) = mpsc::channel(10);
                 Box::new(
                     self.tx_new.clone().send(tx_msg)
-                        .map_err(|_| hyper::Error::Incomplete)// other errors types disallowed by hyper
-                        .and_then(|_|{
+                        .and_then(|_|
                             Ok(Response::new()
                                 .with_status(StatusCode::Ok)
                                 .with_header(AccessControlAllowOrigin::Any)
                                 .with_header(ContentType(mime::TEXT_EVENT_STREAM))
                                 .with_header(Connection::keep_alive())   
                                 .with_body(rx_msg))
-                        })
-                        .into_future()
+                        )
+                        .or_else(|_| Ok(Response::new().with_status(StatusCode::NotAcceptable)))
                 )
-                    
             },
 
             (&Get, "/") => { 
@@ -100,7 +97,7 @@ fn main() {
                         let tx_iter = clients.into_iter()
                             .map(|tx| tx.send(Ok(Chunk::from(msg.clone()))));
                         futures::stream::futures_unordered(tx_iter)
-                            .map(|x| Some(x))
+                            .map(Some)
                             .or_else(|e| { println!("{:?} client removed", e); Ok::<_,()>(None)})
                             .filter_map(|x| x)
                             .collect()
